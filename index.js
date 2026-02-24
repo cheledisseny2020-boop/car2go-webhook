@@ -1,90 +1,3 @@
-import express from "express";
-import fetch from "node-fetch";
-import crypto from "crypto";
-
-const app = express();
-
-/* =====================================================
-   JSON middleware (excepto webhooks)
-===================================================== */
-app.use((req, res, next) => {
-  if (req.path.startsWith("/webhooks/")) return next();
-  return express.json()(req, res, next);
-});
-
-const { SHOPIFY_CLIENT_ID, SHOPIFY_CLIENT_SECRET, APP_URL } = process.env;
-
-/* =====================================================
-   BASE
-===================================================== */
-app.get("/", (req, res) => {
-  res.send("Car2Go webhook server running");
-});
-
-/* =====================================================
-   TEST SHOPIFY TOKEN
-===================================================== */
-app.get("/test-shopify", async (req, res) => {
-  try {
-    const store = process.env.SHOPIFY_STORE;
-    const token = process.env.SHOPIFY_ADMIN_TOKEN;
-
-    const r = await fetch(`https://${store}/admin/api/2024-01/shop.json`, {
-      headers: { "X-Shopify-Access-Token": token },
-    });
-
-    const data = await r.json();
-    return res.status(r.status).json(data);
-  } catch (e) {
-    return res.status(500).json({ error: e.message });
-  }
-});
-
-/* =====================================================
-   OAUTH
-===================================================== */
-app.get("/auth", (req, res) => {
-  const shop = req.query.shop;
-  if (!shop) return res.status(400).send("Missing ?shop=");
-
-  const scope = "read_products,write_products,read_orders";
-  const redirectUri = `${APP_URL}/auth/callback`;
-
-  const installUrl =
-    `https://${shop}/admin/oauth/authorize` +
-    `?client_id=${SHOPIFY_CLIENT_ID}` +
-    `&scope=${encodeURIComponent(scope)}` +
-    `&redirect_uri=${encodeURIComponent(redirectUri)}`;
-
-  return res.redirect(installUrl);
-});
-
-app.get("/auth/callback", async (req, res) => {
-  const { shop, code } = req.query;
-
-  const tokenRes = await fetch(`https://${shop}/admin/oauth/access_token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      client_id: SHOPIFY_CLIENT_ID,
-      client_secret: SHOPIFY_CLIENT_SECRET,
-      code,
-    }),
-  });
-
-  await tokenRes.json();
-
-  console.log("✅ OAuth OK");
-  res.send("App instalada correctamente");
-});
-
-/* =====================================================
-   WEBHOOK TEST GET
-===================================================== */
-app.get("/webhooks/orders-paid", (req, res) => {
-  res.send("Webhook endpoint OK");
-});
-
 /* =====================================================
    WEBHOOK REAL — ORDERS PAID
 ===================================================== */
@@ -115,22 +28,29 @@ app.post(
       const store = process.env.SHOPIFY_STORE;
       const token = process.env.SHOPIFY_ADMIN_TOKEN;
 
+      /* =====================================================
+         RECORRER ITEMS
+      ===================================================== */
       for (const item of payload.line_items || []) {
+
         const props = item.properties || [];
 
-        const start = props.find(p => p.name === "start")?.value;
-        const end = props.find(p => p.name === "end")?.value;
+        /* detectar fechas flexible */
+        const start = props.find(p => /start|retiro/i.test(p.name))?.value;
+        const end   = props.find(p => /end|devol/i.test(p.name))?.value;
 
         if (!start || !end) {
-          console.log("⚠️ item sin fechas");
+          console.log("⚠️ item sin fechas", props);
           continue;
         }
 
         const productId = item.product_id;
 
-        console.log("📅 Reservando", start, "→", end);
+        console.log("📅 Reservando", start, "→", end, "producto", productId);
 
-        /* generar rango fechas */
+        /* =====================================================
+           GENERAR RANGO FECHAS
+        ===================================================== */
         const dates = [];
         let d = new Date(start);
         const last = new Date(end);
@@ -140,7 +60,9 @@ app.post(
           d.setDate(d.getDate() + 1);
         }
 
-        /* leer metafield existente */
+        /* =====================================================
+           LEER METAFIELD ACTUAL
+        ===================================================== */
         const mfRes = await fetch(
           `https://${store}/admin/api/2024-01/products/${productId}/metafields.json`,
           {
@@ -162,12 +84,18 @@ app.post(
           } catch {}
         }
 
-        /* merge sin duplicados */
+        /* =====================================================
+           MERGE SIN DUPLICADOS
+        ===================================================== */
         const merged = [...new Set([...current, ...dates])];
 
         console.log("📦 Guardando fechas:", merged);
 
+        /* =====================================================
+           GUARDAR METAFIELD
+        ===================================================== */
         if (existing) {
+
           await fetch(
             `https://${store}/admin/api/2024-01/metafields/${existing.id}.json`,
             {
@@ -185,7 +113,9 @@ app.post(
               }),
             }
           );
+
         } else {
+
           await fetch(
             `https://${store}/admin/api/2024-01/products/${productId}/metafields.json`,
             {
@@ -204,32 +134,15 @@ app.post(
               }),
             }
           );
+
         }
       }
 
-      res.status(200).send("Dates saved");
+      return res.status(200).send("Dates saved");
+
     } catch (err) {
       console.log("❌ Error webhook:", err);
-      res.status(500).send("Server error");
+      return res.status(500).send("Server error");
     }
   }
 );
-
-/* =====================================================
-   TEST WEBHOOK MANUAL
-===================================================== */
-app.post(
-  "/webhooks/test",
-  express.raw({ type: "application/json" }),
-  (req, res) => {
-    console.log("TEST WEBHOOK BODY:");
-    console.log(req.body.toString());
-    res.sendStatus(200);
-  }
-);
-
-/* =====================================================
-   START SERVER
-===================================================== */
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Server running on port", PORT));
