@@ -68,6 +68,9 @@ function buildDateRange(start, end) {
   return dates;
 }
 
+/* =====================================================
+   METAFIELD: custom.booked_ranges  ✅
+===================================================== */
 async function getUnavailableDates(store, token, productId) {
   const mfRes = await fetch(
     `https://${store}/admin/api/2024-01/products/${productId}/metafields.json`,
@@ -76,8 +79,10 @@ async function getUnavailableDates(store, token, productId) {
 
   const mfData = await mfRes.json();
 
+  // ✅ ahora usamos el metafield real del storefront:
+  // custom.booked_ranges
   const existing = mfData.metafields?.find(
-    m => m.namespace === "booking" && m.key === "unavailable_dates"
+    m => m.namespace === "custom" && m.key === "booked_ranges"
   );
 
   let current = [];
@@ -121,8 +126,9 @@ async function saveUnavailableDates(store, token, existing, productId, nextArray
         },
         body: JSON.stringify({
           metafield: {
-            namespace: "booking",
-            key: "unavailable_dates",
+            // ✅ ahora guardamos en custom.booked_ranges
+            namespace: "custom",
+            key: "booked_ranges",
             value,
             type: "json",
           },
@@ -236,7 +242,6 @@ app.post(
 
 /* =====================================================
    WEBHOOK — REFUNDS CREATE (LIBERAR FECHAS POR REEMBOLSO)
-   (Recomendado si reembolsas en vez de cancelar)
 ===================================================== */
 app.post(
   "/webhooks/refunds-create",
@@ -289,3 +294,5 @@ app.post(
     }
   }
 );
+
+/* ===================== /C2G WEBHOOKS ===================== */
