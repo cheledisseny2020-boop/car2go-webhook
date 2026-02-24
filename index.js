@@ -24,78 +24,85 @@ app.post(
       console.log("✅ HMAC OK");
 
       const payload = JSON.parse(req.body.toString("utf8"));
-
       const store = process.env.SHOPIFY_STORE;
       const token = process.env.SHOPIFY_ADMIN_TOKEN;
 
-      /* =====================================================
-         RECORRER ITEMS
-      ===================================================== */
       for (const item of payload.line_items || []) {
+        const propsRaw = item.properties || {};
+        let start = "";
+        let end = "";
 
-        const props = item.properties || [];
-
-        /* detectar fechas flexible */
-        const start = props.find(p => /start|retiro/i.test(p.name))?.value;
-        const end   = props.find(p => /end|devol/i.test(p.name))?.value;
+        // 1) Si Shopify lo manda como ARRAY [{name,value}]
+        if (Array.isArray(propsRaw)) {
+          start =
+            propsRaw.find(p => /^(start|retiro)$/i.test(p?.name))?.value ||
+            propsRaw.find(p => /start|retiro/i.test(p?.name))?.value ||
+            "";
+          end =
+            propsRaw.find(p => /^(end|devolución|devolucion)$/i.test(p?.name))?.value ||
+            propsRaw.find(p => /end|devol/i.test(p?.name))?.value ||
+            "";
+        }
+        // 2) Si Shopify lo manda como OBJETO {start:"", end:"", "Retiro":"", "Devolución":""}
+        else if (propsRaw && typeof propsRaw === "object") {
+          start =
+            propsRaw.start ||
+            propsRaw.Start ||
+            propsRaw.Retiro ||
+            propsRaw["Retiro"] ||
+            propsRaw.retiro ||
+            propsRaw["retiro"] ||
+            "";
+          end =
+            propsRaw.end ||
+            propsRaw.End ||
+            propsRaw.Devolución ||
+            propsRaw["Devolución"] ||
+            propsRaw.Devolucion ||
+            propsRaw["Devolucion"] ||
+            propsRaw.devolucion ||
+            propsRaw["devolucion"] ||
+            "";
+        }
 
         if (!start || !end) {
-          console.log("⚠️ item sin fechas", props);
+          console.log("⚠️ item sin fechas | properties:", propsRaw);
           continue;
         }
 
         const productId = item.product_id;
-
         console.log("📅 Reservando", start, "→", end, "producto", productId);
 
-        /* =====================================================
-           GENERAR RANGO FECHAS
-        ===================================================== */
+        // Generar rango (incluye start y end)
         const dates = [];
-        let d = new Date(start);
-        const last = new Date(end);
+        let d = new Date(`${start}T00:00:00`);
+        const last = new Date(`${end}T00:00:00`);
 
         while (d <= last) {
           dates.push(d.toISOString().split("T")[0]);
           d.setDate(d.getDate() + 1);
         }
 
-        /* =====================================================
-           LEER METAFIELD ACTUAL
-        ===================================================== */
+        // Leer metafield actual
         const mfRes = await fetch(
           `https://${store}/admin/api/2024-01/products/${productId}/metafields.json`,
-          {
-            headers: { "X-Shopify-Access-Token": token },
-          }
+          { headers: { "X-Shopify-Access-Token": token } }
         );
 
         const mfData = await mfRes.json();
-
         const existing = mfData.metafields?.find(
           m => m.namespace === "booking" && m.key === "unavailable_dates"
         );
 
         let current = [];
-
         if (existing?.value) {
-          try {
-            current = JSON.parse(existing.value);
-          } catch {}
+          try { current = JSON.parse(existing.value); } catch {}
         }
 
-        /* =====================================================
-           MERGE SIN DUPLICADOS
-        ===================================================== */
         const merged = [...new Set([...current, ...dates])];
-
         console.log("📦 Guardando fechas:", merged);
 
-        /* =====================================================
-           GUARDAR METAFIELD
-        ===================================================== */
         if (existing) {
-
           await fetch(
             `https://${store}/admin/api/2024-01/metafields/${existing.id}.json`,
             {
@@ -113,9 +120,7 @@ app.post(
               }),
             }
           );
-
         } else {
-
           await fetch(
             `https://${store}/admin/api/2024-01/products/${productId}/metafields.json`,
             {
@@ -134,12 +139,10 @@ app.post(
               }),
             }
           );
-
         }
       }
 
       return res.status(200).send("Dates saved");
-
     } catch (err) {
       console.log("❌ Error webhook:", err);
       return res.status(500).send("Server error");
