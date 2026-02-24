@@ -15,6 +15,32 @@ app.get("/", (req, res) => {
   res.send("Car2Go webhook server running");
 });
 
+/* ✅ TEST: confirma que SHOPIFY_ADMIN_TOKEN funciona contra Shopify */
+app.get("/test-shopify", async (req, res) => {
+  try {
+    const store = process.env.SHOPIFY_STORE; // ej: car2go-2.myshopify.com
+    const token = process.env.SHOPIFY_ADMIN_TOKEN; // ej: shpat_...
+
+    if (!store || !token) {
+      return res.status(500).json({
+        error: "Missing env variables",
+        need: ["SHOPIFY_STORE", "SHOPIFY_ADMIN_TOKEN"]
+      });
+    }
+
+    const r = await fetch(`https://${store}/admin/api/2024-01/shop.json`, {
+      headers: {
+        "X-Shopify-Access-Token": token
+      }
+    });
+
+    const data = await r.json();
+    return res.status(r.status).json(data);
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 // ✅ Step 1: iniciar OAuth
 app.get("/auth", (req, res) => {
   const shop = req.query.shop;
@@ -51,11 +77,12 @@ app.get("/auth/callback", async (req, res) => {
 
   const data = await tokenRes.json();
 
-  console.log("✅ ACCESS TOKEN:", data.access_token);
+  // ✅ No imprimimos el token en logs (seguridad)
+  console.log("✅ OAuth OK");
 
-  // Ojo: por ahora solo lo mostramos en logs.
-  // Luego lo guardamos (DB / KV / file / etc).
-  return res.send("✅ App instalada correctamente. Revisa los logs en Render.");
+  // Nota: este access_token NO lo estamos guardando aquí.
+  // Para producción, se guarda en DB/KV por tienda.
+  return res.send("✅ App instalada correctamente. (OAuth OK)");
 });
 
 // ✅ Webhook prueba
