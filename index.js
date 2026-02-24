@@ -130,6 +130,12 @@ app.post(
       }
 
       console.log("✅ HMAC OK");
+
+      // 🔎 DEBUG: ver dónde vienen las fechas
+      const payload = JSON.parse(req.body.toString("utf8"));
+      console.log("🧾 note_attributes:", payload.note_attributes);
+      console.log("🧾 line_item properties:", payload.line_items?.[0]?.properties);
+
       return res.status(200).send("OK");
     } catch (e) {
       console.log("❌ Webhook error:", e.message);
