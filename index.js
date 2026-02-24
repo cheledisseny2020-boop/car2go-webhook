@@ -6,11 +6,11 @@ const app = express();
 
 /**
  * Importante:
- * - Webhooks Shopify requieren raw body para validar HMAC.
- * - Para el resto de rutas usamos express.json().
+ * - Shopify webhooks necesitan RAW body para validar HMAC.
+ * - Para el resto de rutas usamos JSON normal.
  */
 
-// ✅ Middleware JSON SOLO para rutas que NO sean /webhooks/*
+// ✅ JSON SOLO para rutas que NO sean /webhooks/*
 app.use((req, res, next) => {
   if (req.path.startsWith("/webhooks/")) return next();
   return express.json()(req, res, next);
@@ -18,16 +18,20 @@ app.use((req, res, next) => {
 
 const { SHOPIFY_CLIENT_ID, SHOPIFY_CLIENT_SECRET, APP_URL } = process.env;
 
-// ✅ Ruta base
+/** ======================
+ *  BASE
+ *  ====================== */
 app.get("/", (req, res) => {
   res.send("Car2Go webhook server running");
 });
 
-/* ✅ TEST: confirma que SHOPIFY_ADMIN_TOKEN funciona contra Shopify */
+/** ======================
+ *  TEST SHOPIFY TOKEN
+ *  ====================== */
 app.get("/test-shopify", async (req, res) => {
   try {
-    const store = process.env.SHOPIFY_STORE;
-    const token = process.env.SHOPIFY_ADMIN_TOKEN;
+    const store = process.env.SHOPIFY_STORE; // ej: car2go-2.myshopify.com
+    const token = process.env.SHOPIFY_ADMIN_TOKEN; // ej: shpat_...
 
     if (!store || !token) {
       return res.status(500).json({
@@ -47,7 +51,9 @@ app.get("/test-shopify", async (req, res) => {
   }
 });
 
-// ✅ Step 1: iniciar OAuth
+/** ======================
+ *  OAUTH
+ *  ====================== */
 app.get("/auth", (req, res) => {
   const shop = req.query.shop;
   if (!shop) return res.status(400).send("Missing ?shop=");
@@ -60,12 +66,11 @@ app.get("/auth", (req, res) => {
     `?client_id=${SHOPIFY_CLIENT_ID}` +
     `&scope=${encodeURIComponent(scope)}` +
     `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-    `&shop=${encodeURIComponent(shop)}`; // recomendado
+    `&shop=${encodeURIComponent(shop)}`;
 
   return res.redirect(installUrl);
 });
 
-// ✅ Step 2: callback OAuth
 app.get("/auth/callback", async (req, res) => {
   const { shop, code } = req.query;
   if (!shop || !code) return res.status(400).send("Missing shop/code");
@@ -85,11 +90,11 @@ app.get("/auth/callback", async (req, res) => {
   return res.send("✅ App instalada correctamente. (OAuth OK)");
 });
 
-// =========================
-// ✅ WEBHOOKS
-// =========================
+/** ======================
+ *  WEBHOOKS
+ *  ====================== */
 
-// (solo debug) evita "Cannot GET" si lo abres en navegador:
+// ✅ Debug (para confirmar que Render corre el código nuevo)
 app.get("/webhooks/orders-paid", (req, res) => {
   res.status(200).send("OK webhook endpoint (GET test)");
 });
@@ -102,7 +107,7 @@ app.post(
     try {
       console.log("✅ Shopify webhook HIT:", req.path);
 
-      const secret = process.env.SHOPIFY_WEBHOOK_SECRET;
+      const secret = process.env.SHOPIFY_WEBHOOK_SECRET; // OJO: debe existir en Render
       const hmac = req.get("X-Shopify-Hmac-Sha256");
 
       if (!secret) {
@@ -125,9 +130,6 @@ app.post(
       }
 
       console.log("✅ HMAC OK");
-
-      // Por ahora: solo confirmamos recepción.
-      // Luego aquí metemos lógica de bloqueo de fechas.
       return res.status(200).send("OK");
     } catch (e) {
       console.log("❌ Webhook error:", e.message);
@@ -136,11 +138,16 @@ app.post(
   }
 );
 
-// ✅ Webhook prueba viejo (Order creation)
-app.post("/webhooks/test", express.json(), (req, res) => {
-  console.log("Webhook test recibido:", req.body);
-  res.sendStatus(200);
-});
+// ✅ Webhook antiguo (Order creation) para test rápido
+app.post(
+  "/webhooks/test",
+  express.raw({ type: "application/json" }),
+  (req, res) => {
+    console.log("✅ Webhook test HIT:", req.path);
+    console.log("Body(raw):", req.body?.toString("utf8")?.slice(0, 500));
+    res.sendStatus(200);
+  }
+);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("Server running on port", PORT));
